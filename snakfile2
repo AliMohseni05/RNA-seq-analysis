@@ -1,0 +1,185 @@
+%%writefile Snakefile
+# Snakefile for Tomato RNA-seq Analysis Pipeline
+import os
+
+configfile: "config.yaml"
+
+# Define SRA accessions
+#SRR_IDS = [f"SRR987959{i}" for i in range(4, 10)] + [f"SRR987960{i}" for i in range(0, 6)]
+SRR_IDS = ['SRR9879602', 'SRR9879603', 'SRR9879604', 'SRR9879605']
+
+# Reference files
+GENOME = config["genome"]
+GTF = config["annotation"]
+
+rule all:
+    input:
+        expand("results/counts/{srr}.counts.txt", srr=SRR_IDS),
+        "multiqc_report.html"
+
+# SRA Download
+rule download_sra:
+    output:
+        "data/raw_sra/{srr}/{srr}.sra"
+    params:
+        prefetch_dir=temp("data/raw/.prefetch/{srr}")
+    log:
+        "logs/sra/download_sra/{srr}.log"
+
+    shell:
+        """
+         prefetch {wildcards.srr} -O data/raw_sra/  > {log} 2>&1
+        """
+    #wrapper:
+        #"v1.2.0/bio/sra-tools/fasterq-dump"
+
+# splite sra
+rule splite:
+    input:
+        "data/raw_sra/{srr}/{srr}.sra"
+    output:
+        "data/splite/{srr}.fastq"
+    log:
+        "logs/splite/{srr}.log"
+    threads: 8
+    shell:
+        """
+        fasterq-dump {wildcards.srr} -e {threads} -O data/splite/ > {log} 2>&1
+        """
+
+
+# FastQC Raw
+rule QC_raw:
+    input:
+        "data/splite/{srr}.fastq"
+    output:
+        html="results/QC/raw/{srr}_fastqc.html",
+        zip="results/QC/raw/{srr}_fastqc.zip"
+    log:
+        "logs/QC/{srr}.log"
+    threads: 2
+    wrapper:
+        "v1.2.0/bio/fastqc"
+
+# Trimmomatic
+rule trim_reads:
+    input:
+        "data/splite/{srr}.fastq"
+    output:
+        trimmed="data/trimmed/{srr}.trimmed.fastq",
+        #unpaired="data/trimmed/{srr}.unpaired.fastq"  # Uncomment if processing paired-end reads
+    params:
+        adapters=config["trimmomatic"]["adapters"],  # Path to adapters file (e.g., "TruSeq3-SE.fa")
+        leading=20,          # Remove leading low-quality bases (Q<20)
+        trailing=20,         # Remove trailing low-quality bases (Q<20)
+        sliding_window="4:20",  # Window size:4, avg quality ≥20
+        minlen=36           # Drop reads shorter than 36bp
+    log:
+        "logs/trimmomatic/{srr}.log"
+    threads: 4
+    shell:
+        """
+        trimmomatic SE -threads {threads} \
+            {input} {output.trimmed} \
+            ILLUMINACLIP:{params.adapters}:2:30:10 \
+            LEADING:{params.leading} \
+            TRAILING:{params.trailing} \
+            SLIDINGWINDOW:{params.sliding_window} \
+            MINLEN:{params.minlen} \
+            > {log} 2>&1
+        """
+    #wrapper:
+        #"v1.2.0/bio/trimmomatic/se"
+
+# FastQC Trimmed
+rule QC_trimmed:
+    input:
+        "data/trimmed/{srr}.trimmed.fastq"
+    output:
+        html="results/QC/trimmed/{srr}_trimmed_fastqc.html",
+        zip="results/QC/trimmed/{srr}_trimmed_fastqc.zip"
+    log:
+        "logs/QC/trimmed/{srr}.log"
+    threads: 2
+    wrapper:
+        "v1.2.0/bio/fastqc"
+
+# HISAT2 Index
+rule hisat2_index:
+    input:
+        "resources/Solanum_lycopersicum.SL3.0.dna.toplevel.fa"
+    output:
+        expand("resources/hisat2_index/reference_index.{i}.ht2", i=range(1, 9))
+    params:
+        prefix="resources/hisat2_index/reference_index"
+    log:
+        "logs/hisat2/index.log"
+    threads: 8
+    shell:
+        """
+        mkdir -p logs/hisat2
+        hisat2-build -p {threads} {input} reference_index {params.prefix}  > {log} 2>&1
+        mv *.ht2 resources/hisat2_index
+        """
+
+# HISAT2 Alignment
+rule hisat2_align:
+    input:
+        fastq="data/trimmed/{srr}.trimmed.fastq",
+        index=directory("resources/hisat2_index")
+    output:
+        bam="results/{srr}.bam"
+    params:
+        index_prefix="resources/hisat2_index"
+    log:
+        "logs/hisat2/{srr}.log"
+    threads: 8
+    shell:
+        """
+        hisat2 -x {input.index} -U {input.fastq} -S {output.bam}
+        --threads {threads} --dta --summary-file {log}
+        """
+
+# SAM to BAM
+rule samtools_sort:
+    input:
+        "results/aligned/{srr}.sam"
+    output:
+        "results/aligned/{srr}.sorted.bam"
+    log:
+        "logs/samtools/{srr}.sort.log"
+    threads: 4
+    shell:
+        "samtools sort -@ {threads} -o {output} {input} > {log} 2>&1"
+
+
+# HTSeq Count
+rule htseq_count:
+    input:
+        bam="results/aligned/{srr}.sorted.bam",
+        gff=GTF
+    output:
+        "results/counts/{srr}.counts.txt"
+    log:
+        "logs/htseq/{srr}.log"
+    threads: 1
+    shell:
+        """
+        htseq-count -f bam -r pos -s no -t exon -i ID {input.bam} {input.gff} > {output} 2> {log}
+        """
+
+
+# MultiQC Report
+rule multiqc:
+    input:
+        fastqc_raw=expand("results/QC/raw/{srr}_fastqc.zip", srr=SRR_IDS),
+        fastqc_trimmed=expand("results/QC/trimmed/{srr}_trimmed_fastqc.zip", srr=SRR_IDS),
+        trimmomatic_logs=expand("logs/trimmomatic/{srr}.log", srr=SRR_IDS),
+        bam_files=expand("results/aligned/{srr}.sorted.bam", srr=SRR_IDS)
+    output:
+        "multiqc_report.html"
+    shell:
+        """
+        multiqc results/fastqc/raw results/fastqc/trimmed logs/trimmomatic results/aligned -o .
+        """
+
