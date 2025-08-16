@@ -1,0 +1,16 @@
+
+
+
+
+
+hisat2 -x /media/bbl/201da159-b034-465f-9ef6-6e4f133a16b3/soil_s/datadb/indx  -1 SRR5025144_1.fastq -2 SRR5025144_2.fastq -S out/SRR5025144.sam
+
+
+
+samtools view -b out/SRR5025144.sam > SRR5025144.bam
+
+
+samtools sort SRR5025144.bam -o SRR5025144.sorted.bam
+
+
+htseq-count -f bam -s reverse SRR5025144.sorted.bam Arabidopsis_thaliana.TAIR10.60.gtf > count.SRR5025144.txt 
