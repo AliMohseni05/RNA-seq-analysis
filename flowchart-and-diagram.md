@@ -37,14 +37,14 @@
 prefetch SRR9879604
 # Convert
 #Convert to FASTQ (single-end example)
-
-fastq-dump --split-files SRR9879604
+fastq-dump --split-files  SRRXXXXXXX
 
 # QC 
-fastqc /content/SRR9879604_1.fastq
+fastqc /content/SRRXXXXXXX_1.fastq
+
 # trimmomatic
 trimmomatic SE -threads 4 \
-              /content/SRR9879604_1.fastq /content/SRR9879604_trim.fastq \
+              /content/SRRXXXXXXX_1.fastq /content/SRRXXXXXXX_trim.fastq \
               ILLUMINACLIP:TruSeq3-SE.fa:2:30:10 \
               LEADING:20 \
               TRAILING:20 \
@@ -52,23 +52,18 @@ trimmomatic SE -threads 4 \
               MINLEN:36 \
               > trimmomatic.log 2>&1
 # QC 
-fastqc /content/SRR9879604_1.fastq
+fastqc /content/SRRXXXXXXX_1.fastq
 
 # annotation
+## genome of your plant in fastA and annotation
 wget https://ftp.ensemblgenomes.ebi.ac.uk/pub/plants/release-61/fasta/solanum_lycopersicum/dna/Solanum_lycopersicum.SL3.0.dna.toplevel.fa.gz
-
 wget  https://ftp.ensemblgenomes.ebi.ac.uk/pub/plants/release-61/gff3/solanum_lycopersicum/Solanum_lycopersicum.SL3.0.61.chr.gff3.gz
-
+### unzip files
 gunzip /content/Solanum_lycopersicum.SL3.0.dna.toplevel.fa.gz
-
 gunzip /content/Solanum_lycopersicum.SL3.0.61.chr.gff3.gz
 
+## hisat2-build to make a genome index 
 hisat2-build -p 8 /content/Solanum_lycopersicum.SL3.0.dna.toplevel.fa reference_index
-
-
-mkdir -p reference_index
-
-mv *.ht2 reference_index
 
 # combined
 hisat2 -x /content/reference_index/reference_index \
@@ -83,40 +78,22 @@ hisat2 -x /content/reference_index/reference_index \
 !head /content/combined_output.sam    # Peek at alignment results
 
 
-# Sort BAM by genomic coordinates
+# Sort BAM by genomic coordinates,
+## make bam file
 samtools view -b /content/combined_output.sam > /content/combined_output.bam
+## make bam sorted 
+samtools sort SRR5025144.bam -o SRR5025144.sorted.bam
 
-samtools sort -@ 4 -o sample.sorted.bam /content/combined_output.bam
-
-  
-
-# Index the sorted BAM
-
-!samtools index sample.sorted.bam
-
-
-
-
+# count reads 
 htseq-count -f bam -s no sample.sorted.bam /content/tomato.gtf > counts.txt
 
-# Convert GFF3 → GTF
+#troubleshooting
+If htseq-count didn't read GFF3 file use GFT file 
+#### dowload GTF file 
+wget ftp://ftp.ensemblgenomes.org/pub/plants/release-54/gtf/arabidopsis_thaliana/Arabidopsis_thaliana.TAIR10.54.gtf.gz
 
+#### Uncompress the file
+gunzip Arabidopsis_thaliana.TAIR10.54.gtf.gz
+
+## Convert GFF3 → GTF
 !gffread Solanum_lycopersicum.SL3.0.61.chr.gff3 -T -o tomato.gtf
-
-  
-
-# Now run htseq-count with the GTF
-
-!htseq-count \
-
-  -f bam \
-
-  -s no \
-
-  -r pos \
-
-  tomato.sorted.bam \
-
-  tomato.gtf \
-
-  > counts.txt
