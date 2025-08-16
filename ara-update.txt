@@ -1,10 +1,88 @@
+Install Tools (hisat2, sratoolkit, subread) │
+Download SRA Data (SRR31323940, SRR31323925) → Split into FASTQ │
+Download Reference Genome (FASTA) → Unzip → Build HISAT2 Index │
+Align FASTQ to Genome (HISAT2) → SAM → Convert to BAM (samtools) → Sort BAM │
+Download Annotation (GFF3/GTF) → Unzip │
+Quantify Gene Expression: ├─ htseq-count → Counts (count.txt) └─ featureCounts → Counts (feature_counts.txt) better
+
+#!/bin/bash
+
+# PARAMETERS - SET THESE BEFORE RUNNING
+SRA_ACCESSION="SRR9879604"  # Replace with your SRA accession
+THREADS=4                    # Number of threads for Trimmomatic
+MIN_LENGTH=36                # Minimum read length to keep
+TRIM_LOG="trimmomatic.log"   # Trimmomatic log file
+
+# 1. DOWNLOAD SRA FILE
+echo "Downloading $SRA_ACCESSION..."
+prefetch $SRA_ACCESSION
+
+# 2. CONVERT TO FASTQ
+echo "Converting to FASTQ..."
+fastq-dump --split-files $SRA_ACCESSION
+
+# 3. INITIAL QUALITY CONTROL
+echo "Running initial FastQC..."
+fastqc "${SRA_ACCESSION}_1.fastq"
+
+# 4. TRIMMING WITH TRIMMOMATIC
+echo "Running Trimmomatic..."
+trimmomatic SE -threads $THREADS \
+"${SRA_ACCESSION}_1.fastq" \
+"${SRA_ACCESSION}_trim.fastq" \
+ILLUMINACLIP:TruSeq3-SE.fa:2:30:10 \
+LEADING:20 \
+TRAILING:20 \
+SLIDINGWINDOW:4:20 \
+MINLEN:$MIN_LENGTH \
+> $TRIM_LOG 2>&1
+
+# 5. POST-TRIMMING QUALITY CONTROL
+echo "Running post-trimming FastQC..."
+fastqc "${SRA_ACCESSION}_trim.fastq"
+
+echo "Pipeline complete!"
+
+
+#secqnd step 
+#!/bin/bash
+
+###############################
+# RNA-Seq Analysis Pipeline
+# Steps: Alignment → SAM→BAM → Sorting → Quantification
+###############################
+
+# 1. ALIGN READS TO REFERENCE GENOME
+echo "Step 1/4: Aligning reads with HISAT2..."
+hisat2 -x /media/bbl/201da159-b034-465f-9ef6-6e4f133a16b3/soil_s/datadb/indx \
+       -1 SRR5025144_1.fastq \
+       -2 SRR5025144_2.fastq \
+       -S out/SRR5025144.sam
+
+# 2. CONVERT SAM TO BAM FORMAT
+echo "Step 2/4: Converting SAM to BAM..."
+samtools view -b out/SRR5025144.sam > SRR5025144.bam
+
+# 3. SORT BAM FILE
+echo "Step 3/4: Sorting BAM file..."
+samtools sort SRR5025144.bam -o SRR5025144.sorted.bam
+
+# 4. GENE EXPRESSION QUANTIFICATION
+echo "Step 4/4: Counting reads with HTSeq..."
+htseq-count -f bam \
+            -s reverse \
+            SRR5025144.sorted.bam \
+            Arabidopsis_thaliana.TAIR10.60.gtf \
+            > count.SRR5025144.txt
+
+echo "Pipeline completed successfully!"
 
 
 
 
+#simpelcode
 
 hisat2 -x /media/bbl/201da159-b034-465f-9ef6-6e4f133a16b3/soil_s/datadb/indx  -1 SRR5025144_1.fastq -2 SRR5025144_2.fastq -S out/SRR5025144.sam
-
 
 
 samtools view -b out/SRR5025144.sam > SRR5025144.bam
