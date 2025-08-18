@@ -12,7 +12,7 @@
    │
 6. Quantify Gene Expression:
       ├─ htseq-count → Counts (count.txt)
-      └─ featureCounts → Counts (feature_counts.txt) better 
+      └─ featureCounts → Counts (feature_counts.txt)
 
 The script performs RNA-seq analysis for Arabidopsis thaliana using data from two SRA accessions (SRR31323940 and SRR31323925). Key steps include:
 
